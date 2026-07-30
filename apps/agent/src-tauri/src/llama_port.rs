@@ -1,0 +1,147 @@
+//! HTTP port of the app-managed llama-server — deliberately **not** fixed (avoids 8080 / proxies).
+//!
+//! ## TOCTOU (we drop the listener, then `llama-server` binds)
+//!
+//! We cannot hand an FD to `llama-server` without upstream support, so after picking
+//! a port there is always a window where another process could claim it before the
+//! child does. Mitigations here:
+//!
+//! 1. Prefer the **`FLOWMATES_PORT_MIN`..=`FLOWMATES_PORT_MAX`** range, outside the
+//!    kernel's usual ephemeral range for outbound connections (32768–60999 on Linux,
+//!    for instance), which reduces collisions with ports taken by short-lived clients.
+//! 2. After the first probe `bind`, an **immediate second `bind`** detects whether the
+//!    port was claimed between the drop and the next attempt (reject it and try another).
+//! 3. Fall back to `127.0.0.1:0` with **retries and backoff** when the range is full.
+//! 4. `spawn_llama_managed_child` **retries** on another port when it sees `EADDRINUSE`
+//!    or a listen-failure log line (see `agent.rs`).
+//!
+//! Every URL uses **`127.0.0.1`**, never `localhost`, to keep the client and the
+//! server's `--host` aligned — a stable IPv4 rather than `::1`.
+
+use std::io;
+use std::net::{Ipv4Addr, TcpListener};
+use std::sync::Mutex;
+use std::thread;
+use std::time::Duration;
+
+static MANAGED_LLAMA_PORT: Mutex<Option<u16>> = Mutex::new(None);
+
+/// Por debajo del rango éphemeral habitual de muchos Linux; alejado de 3000/5000/8000/8080.
+const FLOWMATES_PORT_MIN: u16 = 40_000;
+const FLOWMATES_PORT_MAX: u16 = 44_999;
+
+const BIND0_MAX_RETRIES: u8 = 6;
+
+fn lock_managed_port<'a>() -> std::sync::MutexGuard<'a, Option<u16>> {
+    match MANAGED_LLAMA_PORT.lock() {
+        Ok(g) => g,
+        Err(poisoned) => {
+            log::warn!(
+                "[Flowmates] MANAGED_LLAMA_PORT mutex poisoned; recovering inner value: {}",
+                poisoned
+            );
+            poisoned.into_inner()
+        }
+    }
+}
+
+/// `true` si el error suele indicar que el puerto TCP local ya está en uso (Windows + Unix).
+pub(crate) fn tcp_bind_addr_in_use(err: &io::Error) -> bool {
+    matches!(err.kind(), io::ErrorKind::AddrInUse)
+        || err.raw_os_error() == Some(10048) // WSAEADDRINUSE
+}
+
+fn probe_double_bind_then_release(port: u16) -> Result<(), io::Error> {
+    let first = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
+    drop(first);
+    let second = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
+    drop(second);
+    Ok(())
+}
+
+fn pick_port_in_preferred_range() -> Option<u16> {
+    let span = u32::from(FLOWMATES_PORT_MAX - FLOWMATES_PORT_MIN + 1);
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u32)
+        .unwrap_or(42);
+    let start_offset = seed % span;
+
+    for k in 0u32..span {
+        let idx = (start_offset + k) % span;
+        let port = FLOWMATES_PORT_MIN.checked_add(idx as u16)?;
+        if probe_double_bind_then_release(port).is_ok() {
+            return Some(port);
+        }
+    }
+    None
+}
+
+fn tcp_bind_ephemeral_ipv4_port_with_backoff() -> Result<u16, String> {
+    for attempt in 0..BIND0_MAX_RETRIES {
+        if attempt > 0 {
+            let ms = 5u64.saturating_mul(1u64 << attempt.min(8));
+            thread::sleep(Duration::from_millis(ms));
+        }
+
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .map_err(|e| format!("bind 127.0.0.1:0 failed: {e}"))?;
+        let port = listener
+            .local_addr()
+            .map_err(|e| format!("TCP local_addr failed: {e}"))?
+            .port();
+        drop(listener);
+
+        if probe_double_bind_then_release(port).is_ok() {
+            return Ok(port);
+        }
+    }
+    Err(format!(
+        "could not allocate an ephemeral localhost port after {} attempts",
+        BIND0_MAX_RETRIES
+    ))
+}
+
+/// Elige un puerto en loopback IPv4 para `llama-server`: rango dedicado Flowmates primero,
+/// luego `:0` con reintentos.
+pub fn pick_localhost_listen_port() -> Result<u16, String> {
+    if let Some(p) = pick_port_in_preferred_range() {
+        return Ok(p);
+    }
+    tcp_bind_ephemeral_ipv4_port_with_backoff()
+}
+
+pub fn set_managed_llama_port(port: u16) {
+    *lock_managed_port() = Some(port);
+}
+
+pub fn clear_managed_llama_port() {
+    *lock_managed_port() = None;
+}
+
+pub fn current_managed_listen_port() -> Option<u16> {
+    *lock_managed_port()
+}
+
+pub fn managed_llama_origin() -> Option<String> {
+    current_managed_listen_port().map(|p| format!("http://127.0.0.1:{p}"))
+}
+
+pub fn managed_health_url() -> Option<String> {
+    managed_llama_origin().map(|o| format!("{o}/health"))
+}
+
+pub fn managed_chat_completions_url() -> Option<String> {
+    managed_llama_origin().map(|o| format!("{o}/v1/chat/completions"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn probe_double_bind_localhost_high_port() {
+        let p = pick_port_in_preferred_range().expect("range");
+        assert!((FLOWMATES_PORT_MIN..=FLOWMATES_PORT_MAX).contains(&p));
+    }
+}

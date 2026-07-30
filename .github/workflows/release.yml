@@ -1,0 +1,132 @@
+name: Release — Flowmates for Windows
+
+on:
+  release:
+    types: [published]
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+# Repository secrets — Settings → Secrets and variables → Actions
+#
+# Required to produce signed updater artifacts:
+#   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+#
+# Optional — set these only to bake a backend and integrations into the release.
+# Without them the build is local-only: measurement, local analysis and local
+# reports work; sign-in, sync and integrations report themselves unavailable.
+#   NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
+#   TAURI_JIRA_CLIENT_ID, TAURI_JIRA_CLIENT_SECRET
+#   TAURI_LINEAR_CLIENT_ID, TAURI_LINEAR_CLIENT_SECRET
+#
+# Never commit .env.local — CI injects these into `pnpm build`.
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    env:
+      TAURI_JIRA_CLIENT_ID: ${{ secrets.TAURI_JIRA_CLIENT_ID }}
+      TAURI_JIRA_CLIENT_SECRET: ${{ secrets.TAURI_JIRA_CLIENT_SECRET }}
+      TAURI_LINEAR_CLIENT_ID: ${{ secrets.TAURI_LINEAR_CLIENT_ID }}
+      TAURI_LINEAR_CLIENT_SECRET: ${{ secrets.TAURI_LINEAR_CLIENT_SECRET }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/agent/src-tauri -> target
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build app
+        run: pnpm build
+
+      # The manifest the app polls at releases/latest/download/latest-windows.json.
+      # It points at the NSIS installer, which self-updates per user without a UAC
+      # prompt. GitHub renames release assets by replacing spaces with dots, so the
+      # download URL has to do the same.
+      - name: Generate latest-windows.json (updater manifest)
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          NSIS_DIR="apps/agent/src-tauri/target/release/bundle/nsis"
+          EXE="$(ls "$NSIS_DIR"/*-setup.exe | head -n1)"
+          SIG="$(ls "$NSIS_DIR"/*-setup.exe.sig | head -n1)"
+          BASENAME="$(basename "$EXE")"
+          export ASSET_NAME="$(echo "$BASENAME" | tr ' ' '.')"
+          export APP_VERSION="$(echo "$BASENAME" | sed -E 's/.*_([0-9]+\.[0-9]+\.[0-9]+)_.*/\1/')"
+          export DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${RELEASE_TAG}/${ASSET_NAME}"
+          export SIGNATURE="$(cat "$SIG")"
+          export PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          node -e '
+            const fs = require("fs");
+            const manifest = {
+              version: process.env.APP_VERSION,
+              notes: process.env.RELEASE_BODY || "",
+              pub_date: process.env.PUB_DATE,
+              platforms: {
+                "windows-x86_64": {
+                  signature: process.env.SIGNATURE,
+                  url: process.env.DOWNLOAD_URL
+                }
+              }
+            };
+            fs.writeFileSync("latest-windows.json", JSON.stringify(manifest, null, 2));
+            console.log(manifest);
+          '
+
+      - name: Upload Windows bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-bundle
+          path: |
+            apps/agent/src-tauri/target/release/bundle/nsis/*.exe
+            apps/agent/src-tauri/target/release/bundle/msi/*.msi
+            latest-windows.json
+          if-no-files-found: warn
+
+  attach-to-release:
+    needs: [build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Attach installers to release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          fail_on_unmatched_files: false
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.msi
+            artifacts/**/latest-windows.json

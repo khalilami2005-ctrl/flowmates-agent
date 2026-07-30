@@ -1,0 +1,24 @@
+{
+  "name": "flowmates-windows",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Activity measurement for Windows, analysed by a local vision model",
+  "scripts": {
+    "dev": "corepack pnpm --filter @flowmates/windows dev",
+    "tauri": "corepack pnpm --filter @flowmates/windows exec tauri",
+    "build": "corepack pnpm --filter @flowmates/windows build",
+    "catalog:apps": "cargo run --manifest-path tools/popular-apps-catalog/Cargo.toml"
+  },
+  "workspaces": [
+    "apps/*"
+  ],
+  "packageManager": "pnpm@8.15.0",
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.2"
+  },
+  "repository": "https://github.com/khalilami2005-ctrl/flowmates-agent"
+}
