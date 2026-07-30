@@ -330,19 +330,17 @@ fn perform_sync(db_path: &std::path::PathBuf) -> Result<String, String> {
         .filter(|&n| n >= 80)
         .unwrap_or(SUMMARY_MAX_LINE_CHARS_DEFAULT);
 
-    for r in rows {
-        if let Ok((id, desc, cat, dur, ticket)) = r {
-            ids.push(id);
-            let desc = clamp_line_for_summary(&desc, line_cap);
-            full_text.push_str(&format!("- [{}] {}\n", cat, desc));
-            total_duration += dur;
-            
-            // Stats
-            *categories.entry(cat).or_insert(0) += dur;
-            if let Some(t) = ticket {
-                if !t.is_empty() {
-                    *tickets.entry(t).or_insert(0) += dur;
-                }
+    for (id, desc, cat, dur, ticket) in rows.flatten() {
+        ids.push(id);
+        let desc = clamp_line_for_summary(&desc, line_cap);
+        full_text.push_str(&format!("- [{}] {}\n", cat, desc));
+        total_duration += dur;
+
+        // Stats
+        *categories.entry(cat).or_insert(0) += dur;
+        if let Some(t) = ticket {
+            if !t.is_empty() {
+                *tickets.entry(t).or_insert(0) += dur;
             }
         }
     }
@@ -548,7 +546,7 @@ fn upload_session(
 
     let resp = client.post(&url)
         .header("apikey", supabase_anon_key())
-        .header("Authorization", format!("Bearer {}", &session.access_token))
+        .header("Authorization", format!("Bearer {}", session.access_token))
         .header("Content-Type", "application/json")
         .header("Prefer", "return=minimal")
         .json(&body)
@@ -575,7 +573,7 @@ fn post_activity_report_row(session: &UserSession, body: &serde_json::Value) -> 
     client
         .post(&url)
         .header("apikey", supabase_anon_key())
-        .header("Authorization", format!("Bearer {}", &session.access_token))
+        .header("Authorization", format!("Bearer {}", session.access_token))
         .header("Content-Type", "application/json")
         .header("Prefer", "return=minimal")
         .json(body)
@@ -855,7 +853,7 @@ pub fn join_team(token: String) -> Result<serde_json::Value, String> {
     }
     
     let invitations: Vec<serde_json::Value> = inv_resp.json().map_err(|e| e.to_string())?;
-    let invitation = invitations.get(0).ok_or("Invalid invitation token")?;
+    let invitation = invitations.first().ok_or("Invalid invitation token")?;
     
     println!("[Team] Invitation details: {:?}", invitation);
     let inv_email = invitation["email"].as_str();

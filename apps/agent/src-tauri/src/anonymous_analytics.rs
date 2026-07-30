@@ -3,7 +3,7 @@
 //! Collects only aggregate usage: daily minutes and weekly primary activity category.
 //! No account, email, or other personally identifiable information is sent.
 
-use chrono::{Datelike, Local, NaiveDate};
+use chrono::{Datelike, Local};
 use reqwest::blocking::Client;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -29,8 +29,10 @@ pub struct AnalyticsConsent {
     pub decided_at: Option<String>,
 }
 
+/// `pub(crate)` because `compute_daily_usage` is, and a private return type on a
+/// crate-visible function makes that function uncallable from anywhere else.
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
-struct DailyUsageEntry {
+pub(crate) struct DailyUsageEntry {
     date: String,
     minutes: i32,
 }
@@ -340,6 +342,9 @@ pub fn submit_product_feedback(message: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only the tests build dates by hand; importing NaiveDate at module level
+    // makes it unused in the lib build and clippy strips it, breaking these.
+    use chrono::NaiveDate;
     use rusqlite::Connection;
     use std::fs;
 

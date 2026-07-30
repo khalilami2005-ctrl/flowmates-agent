@@ -143,17 +143,9 @@ fn infer_category_from_content(lower: &str) -> String {
 }
 
 fn build_structured_description(raw: &str) -> String {
-    let fields = [
-        "APP:",
-        "WINDOW TITLE:",
-        "VISIBLE CONTENT:",
-        "FILES OR URLS:",
-        "CURRENT ACTION:",
-        "PROGRESS:",
-        "NEXT STEP:",
-        "CATEGORY:",
-    ];
-
+    // The field list that used to live here fed a test whose two branches were
+    // identical, so it decided nothing and went with it. "CATEGORY:" is still
+    // handled, by the explicit skip below.
     let mut parts: Vec<String> = Vec::new();
 
     for line in raw.lines() {
@@ -176,14 +168,10 @@ fn build_structured_description(raw: &str) -> String {
             continue;
         }
 
-        let is_field = fields
-            .iter()
-            .any(|f| clean.to_uppercase().starts_with(f));
-        if is_field {
-            parts.push(clean.to_string());
-        } else {
-            parts.push(clean.to_string());
-        }
+        // Both branches of the former `if is_field` pushed the same value, so the
+        // test decided nothing. Kept as a plain push rather than guessing what the
+        // field lines were meant to become.
+        parts.push(clean.to_string());
     }
 
     if parts.is_empty() {

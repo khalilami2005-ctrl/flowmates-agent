@@ -80,7 +80,7 @@ pub fn get_git_context(cwd: &str) -> Option<GitContext> {
         });
 
     // If not a git repo, return None
-    if branch.is_none() { return None; }
+    branch.as_ref()?;
 
     // 2. Check Dirty Status
     let is_dirty = git_command()

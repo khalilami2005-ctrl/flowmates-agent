@@ -2,11 +2,17 @@ use chrono::Local;
 use reqwest::blocking::Client;
 use rusqlite::{params, Connection};
 use serde::Serialize;
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::time::Duration;
 use tauri::Emitter;
 
 use crate::vision_model::LLAMA_CHAT_MODEL_ID;
+
+/// One row of `reports`, in the column order the query below selects:
+/// timestamp, date, hour, activity_type, description, jira_ticket_id,
+/// duration_seconds, synced — all localtime.
+type ActivityRow = (String, String, u8, String, String, Option<String>, i32, i32);
 
 const FOCUS_CATEGORIES: &[&str] = &[
     "Coding", "Debugging", "CodeReview", "Testing", "Design", "DevOps", "Database",
@@ -109,7 +115,7 @@ pub fn build_local_insights_report(db_path: &std::path::Path, period_days: i32) 
         )
         .map_err(|e| e.to_string())?;
 
-    let rows: Vec<(String, String, u8, String, String, Option<String>, i32, i32)> = stmt
+    let rows: Vec<ActivityRow> = stmt
         .query_map(params![start_str, end_str], |row| {
             Ok((
                 row.get(0)?,
@@ -201,11 +207,10 @@ pub fn build_local_insights_report(db_path: &std::path::Path, period_days: i32) 
             unsynced_count += 1;
         }
 
-        if prev_day == Some(date.as_str()) {
-            if prev_category != Some(category.as_str()) {
+        if prev_day == Some(date.as_str())
+            && prev_category != Some(category.as_str()) {
                 context_switches += 1;
             }
-        }
         prev_day = Some(date.as_str());
         prev_category = Some(category.as_str());
 
@@ -234,7 +239,7 @@ pub fn build_local_insights_report(db_path: &std::path::Path, period_days: i32) 
             count,
         })
         .collect();
-    category_breakdown.sort_by(|a, b| b.total_seconds.cmp(&a.total_seconds));
+    category_breakdown.sort_by_key(|r| Reverse(r.total_seconds));
 
     let mut ticket_breakdown: Vec<TicketRow> = ticket_map
         .into_iter()
@@ -244,7 +249,7 @@ pub fn build_local_insights_report(db_path: &std::path::Path, period_days: i32) 
             count,
         })
         .collect();
-    ticket_breakdown.sort_by(|a, b| b.total_seconds.cmp(&a.total_seconds));
+    ticket_breakdown.sort_by_key(|r| Reverse(r.total_seconds));
     ticket_breakdown.truncate(20);
 
     let mut daily_totals: Vec<DailyRow> = daily_map
@@ -282,7 +287,7 @@ pub fn build_local_insights_report(db_path: &std::path::Path, period_days: i32) 
             focus_minutes: secs / 60,
         })
         .collect();
-    hourly_focus_rows.sort_by(|a, b| b.focus_minutes.cmp(&a.focus_minutes));
+    hourly_focus_rows.sort_by_key(|r| Reverse(r.focus_minutes));
 
     let mut work_themes: Vec<WorkThemeRow> = theme_map
         .into_iter()
@@ -292,7 +297,7 @@ pub fn build_local_insights_report(db_path: &std::path::Path, period_days: i32) 
             activity_count,
         })
         .collect();
-    work_themes.sort_by(|a, b| b.total_seconds.cmp(&a.total_seconds));
+    work_themes.sort_by_key(|r| Reverse(r.total_seconds));
     work_themes.truncate(12);
 
     let mut longest_sessions: Vec<LongSessionRow> = all_samples
@@ -305,7 +310,7 @@ pub fn build_local_insights_report(db_path: &std::path::Path, period_days: i32) 
             ticket: s.ticket.clone(),
         })
         .collect();
-    longest_sessions.sort_by(|a, b| b.duration_seconds.cmp(&a.duration_seconds));
+    longest_sessions.sort_by_key(|r| Reverse(r.duration_seconds));
     longest_sessions.truncate(12);
 
     let peak_day = daily_totals
@@ -618,6 +623,9 @@ fn section_detail(result: &serde_json::Value, pass_id: &str) -> String {
     extract_english_text(raw.unwrap_or("Section complete."))
 }
 
+// Ten arguments, and a struct for them would only move the same list one level
+// away from the eight call sites that spell it out. Left as is deliberately.
+#[allow(clippy::too_many_arguments)]
 fn llm_section(
     app: &tauri::AppHandle,
     step: u32,
@@ -843,79 +851,6 @@ Return JSON: {\"lessons_learned\":[{\"title\":\"\",\"body\":\"2-3 sentences\"}],
     Ok((report, passes))
 }
 
-fn build_analysis_from_stats(local_data: &serde_json::Value) -> serde_json::Value {
-    let mut focus_patterns = Vec::new();
-    let mut distraction_patterns = Vec::new();
-    let mut themes = Vec::new();
-
-    if let Some(cats) = local_data["category_breakdown"].as_array() {
-        for c in cats.iter().take(5) {
-            let name = c["category"].as_str().unwrap_or("");
-            let h = c["total_seconds"].as_i64().unwrap_or(0) as f64 / 3600.0;
-            if FOCUS_CATEGORIES.contains(&name) {
-                focus_patterns.push(format!("{:.1}h in {}", h, name));
-            } else if DISTRACTION_CATEGORIES.contains(&name) {
-                distraction_patterns.push(format!("{:.1}h in {}", h, name));
-            }
-            themes.push(format!("{} ({:.1}h)", name, h));
-        }
-    }
-
-    let daily_rhythm = if let Some(days) = local_data["daily_totals"].as_array() {
-        let active: Vec<_> = days
-            .iter()
-            .filter(|d| d["total_seconds"].as_i64().unwrap_or(0) > 0)
-            .map(|d| {
-                format!(
-                    "{} {:.1}h",
-                    d["date"].as_str().unwrap_or(""),
-                    d["total_seconds"].as_i64().unwrap_or(0) as f64 / 3600.0
-                )
-            })
-            .collect();
-        if active.is_empty() {
-            "No daily rhythm — insufficient tracked days.".to_string()
-        } else {
-            format!("Activity spread across: {}.", active.join(", "))
-        }
-    } else {
-        "Insufficient daily data.".to_string()
-    };
-
-    serde_json::json!({
-        "focus_patterns": focus_patterns,
-        "distraction_patterns": distraction_patterns,
-        "top_work_themes": themes,
-        "ticket_progress": build_tasks_completed(local_data),
-        "daily_rhythm": daily_rhythm,
-        "friction_points": build_known_issues(local_data, local_data["distraction_events"].as_i64().unwrap_or(0) as i32),
-        "notable_wins": build_work_progress(local_data),
-        "data_gaps": ["Track consistently throughout the day for richer patterns."]
-    })
-}
-
-fn build_diagnosis_from_stats(
-    local_data: &serde_json::Value,
-    _analysis: &serde_json::Value,
-) -> serde_json::Value {
-    let focus_seconds = local_data["focus_seconds"].as_i64().unwrap_or(0) as i32;
-    let total_seconds = local_data["total_seconds"].as_i64().unwrap_or(0) as i32;
-    let distractions = local_data["distraction_events"].as_i64().unwrap_or(0) as i32;
-    let health = compute_overall_health(focus_seconds, total_seconds, distractions);
-
-    serde_json::json!({
-        "overall_health": health,
-        "health_notes": format!(
-            "Focus ratio {:.0}% with {} distraction events in period.",
-            if total_seconds > 0 { focus_seconds as f64 / total_seconds as f64 * 100.0 } else { 0.0 },
-            distractions
-        ),
-        "core_issues": build_known_issues(local_data, distractions),
-        "risk_flags": build_potential_risks(local_data, focus_seconds, total_seconds),
-        "health_breakdown": build_category_health_rows(local_data),
-    })
-}
-
 fn build_section_stats_snapshot(
     section_id: &str,
     local_data: &serde_json::Value,
@@ -973,7 +908,7 @@ fn build_section_stats_snapshot(
             append_daily_detail(&mut lines, local_data);
             append_activity_samples(&mut lines, local_data, 14, 140);
         }
-        "lessons_recommendations" | _ => {
+        _ => {
             append_health_metrics(&mut lines, local_data);
             append_top_categories(&mut lines, local_data, 6);
             append_top_tickets(&mut lines, local_data, 6);
@@ -1253,45 +1188,6 @@ fn truncate_stats_text(text: String, max_chars: usize) -> String {
     text.chars().take(max_chars).collect::<String>() + "…"
 }
 
-fn truncate_json_compact(value: &serde_json::Value, max_chars: usize) -> String {
-    let s = serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string());
-    if s.chars().count() <= max_chars {
-        return s;
-    }
-    s.chars().take(max_chars).collect::<String>() + "…"
-}
-
-fn merge_diagnosis_into_draft(draft: &mut serde_json::Value, diagnosis: &serde_json::Value) {
-    if draft.get("overall_health").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
-        if let Some(h) = diagnosis.get("overall_health") {
-            draft["overall_health"] = h.clone();
-        }
-    }
-    if draft.get("health_notes").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
-        if let Some(n) = diagnosis.get("health_notes") {
-            draft["health_notes"] = n.clone();
-        }
-    }
-    let draft_bd = draft.get("health_breakdown").and_then(|v| v.as_array());
-    if draft_bd.map(|a| a.is_empty()).unwrap_or(true) {
-        if let Some(bd) = diagnosis.get("health_breakdown") {
-            draft["health_breakdown"] = bd.clone();
-        }
-    }
-    let draft_issues = draft.get("known_issues").and_then(|v| v.as_array());
-    if draft_issues.map(|a| a.is_empty()).unwrap_or(true) {
-        if let Some(issues) = diagnosis.get("core_issues") {
-            draft["known_issues"] = issues.clone();
-        }
-    }
-    let draft_risks = draft.get("potential_risks").and_then(|v| v.as_array());
-    if draft_risks.map(|a| a.is_empty()).unwrap_or(true) {
-        if let Some(risks) = diagnosis.get("risk_flags") {
-            draft["potential_risks"] = risks.clone();
-        }
-    }
-}
-
 fn extract_json_block(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.starts_with('{') {
@@ -1396,7 +1292,7 @@ fn extract_english_text(s: &str) -> String {
         .collect();
 
     let segments: Vec<String> = cleaned
-        .split(|c| c == '.' || c == '!' || c == '?' || c == '\n')
+        .split(['.', '!', '?', '\n'])
         .map(str::trim)
         .filter(|seg| !seg.is_empty() && latin_ratio(seg) >= 0.55)
         .map(|seg| seg.split_whitespace().collect::<Vec<_>>().join(" "))

@@ -240,10 +240,8 @@ impl FlowmatesAgent {
                         timestamp: row.get(4)?,
                     })
                 }) {
-                    for row_result in rows {
-                        if let Ok(report) = row_result {
-                            reports.push(report);
-                        }
+                    for report in rows.flatten() {
+                        reports.push(report);
                     }
                 }
             }
@@ -795,7 +793,7 @@ static SERVER_PROCESS: Mutex<Option<std::process::Child>> = Mutex::new(None);
 const LLAMA_LISTEN_PORT_SPAWN_ATTEMPTS: u8 = 8;
 
 fn clamp_llama_gpu_layers(n: i32) -> i32 {
-    n.max(0).min(16_384)
+    n.clamp(0, 16_384)
 }
 
 /// Descending CUDA/Vulkan offload steps for vision GGUF (+ mmproj): try the highest that
@@ -935,6 +933,9 @@ pub fn llama_server_log_tail(max_chars: Option<usize>) -> Result<String, String>
     Ok(read_server_log_tail_chars(n))
 }
 
+// Every argument is a distinct llama-server flag; grouping them in a struct would
+// add a layer without removing anything the callers must still decide.
+#[allow(clippy::too_many_arguments)]
 fn configure_llama_command(
     bin_path: &Path,
     model_path: &Path,
@@ -1055,7 +1056,7 @@ fn try_spawn_llama_process(
         ];
 
         let mut last_err =
-            IoError::new(std::io::ErrorKind::Other, "llama-server spawn failed (no attempts)");
+            IoError::other("llama-server spawn failed (no attempts)");
         let mut spawned: Option<std::process::Child> = None;
         for &(flags, redirect_log) in &attempts {
             let mut cmd = configure_llama_command(
@@ -1069,7 +1070,7 @@ fn try_spawn_llama_process(
                 redirect_log,
                 flags,
             )
-            .map_err(|msg| IoError::new(std::io::ErrorKind::Other, msg))?;
+            .map_err(IoError::other)?;
 
             match cmd.spawn() {
                 Ok(child) => {
@@ -1563,7 +1564,7 @@ mod repetition_tests {
 
     #[test]
     fn truncate_collapses_many_repeated_words() {
-        let spam: String = std::iter::repeat("spam ").take(25).collect();
+        let spam: String = "spam ".repeat(25);
         let out = truncate_repetition(spam.trim());
         assert!(out.len() < spam.len());
     }
