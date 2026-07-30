@@ -120,6 +120,35 @@ fn harden_process_early() {
     }
 }
 
+/// Loads `.env.local` from the repository root, in development builds only.
+///
+/// Vite already feeds the renderer from that file, and a release build bakes the
+/// values in through `option_env!`. Neither covers `tauri dev`, where the Rust
+/// side stayed blind: cloud commands reported themselves unconfigured while the
+/// renderer held a perfectly good configuration.
+///
+/// Deliberately `debug_assertions`-only: a shipped binary must never read paths
+/// relative to a repository that does not exist on the user's machine.
+#[cfg(debug_assertions)]
+fn load_repo_env() {
+  let Ok(exe) = std::env::current_exe() else {
+    return;
+  };
+  let mut dir = exe.parent().map(|p| p.to_path_buf());
+  while let Some(current) = dir {
+    for name in [".env.local", ".env"] {
+      let candidate = current.join(name);
+      if candidate.is_file() {
+        let _ = dotenv::from_filename(&candidate);
+      }
+    }
+    if current.join("pnpm-workspace.yaml").is_file() {
+      return;
+    }
+    dir = current.parent().map(|p| p.to_path_buf());
+  }
+}
+
 fn main() {
   // Must be first: blocks AppInit_DLLs before user32.dll is loaded.
   // See the module-level comment above for the full rationale.
@@ -138,6 +167,13 @@ fn main() {
       let _ = dotenv::from_filename(dir.join(".env"));
     }
   }
+
+  #[cfg(debug_assertions)]
+  load_repo_env();
+
+  // State the backend situation once, out loud. Silence here used to mean a
+  // developer could not tell an unconfigured build from a misconfigured one.
+  eprintln!("[Flowmates] backend: {}", app_lib::backend_status());
 
   // Panic hook: in release the .exe has no stdout, so any panic — including one
   // closing the window during a Google sign-in — used to be lost. We dump it to

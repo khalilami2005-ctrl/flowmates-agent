@@ -899,7 +899,8 @@ fn read_server_log_tail_chars(max_chars: usize) -> String {
     }
 }
 
-/// Estado del proceso hijo que Flowmates lanzó (no confundir con un llama-server huérfano).
+/// State of the child process Flowmates itself launched — not to be confused with
+/// an orphaned llama-server left behind by an earlier run.
 #[tauri::command]
 pub fn llama_managed_process_status() -> Result<serde_json::Value, String> {
     let mut guard = SERVER_PROCESS.lock().unwrap();
@@ -954,7 +955,8 @@ fn configure_llama_command(
     let n_gpu_layers = clamp_llama_gpu_layers(gpu_layers);
 
     let mut cmd = Command::new(bin_path);
-    // Evita heredar stdin inválido tras FreeConsole en el proceso padre (release Windows).
+    // Avoids inheriting an invalid stdin after FreeConsole in the parent process
+    // (release builds on Windows).
     cmd.stdin(std::process::Stdio::null());
     cmd.arg("-m")
         .arg(model_path)

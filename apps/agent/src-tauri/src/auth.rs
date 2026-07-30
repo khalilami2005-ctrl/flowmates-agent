@@ -455,8 +455,8 @@ fn start_supabase_oauth(provider: &str) -> Result<String, String> {
         format!("Failed to open browser: {}", e)
     })?;
     
-    // Start callback listener for Supabase tokens — envuelto en catch_unwind
-    // para no poder tumbar el proceso ante un panic inesperado.
+    // Start callback listener for Supabase tokens — wrapped in catch_unwind so an
+    // unexpected panic cannot bring the process down.
     std::thread::spawn(move || {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             listen_for_supabase_callback();

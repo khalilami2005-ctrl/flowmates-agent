@@ -26,7 +26,7 @@ use std::time::Duration;
 
 static MANAGED_LLAMA_PORT: Mutex<Option<u16>> = Mutex::new(None);
 
-/// Por debajo del rango éphemeral habitual de muchos Linux; alejado de 3000/5000/8000/8080.
+/// Below the ephemeral range most Linux kernels use, and far from 3000/5000/8000/8080.
 const FLOWMATES_PORT_MIN: u16 = 40_000;
 const FLOWMATES_PORT_MAX: u16 = 44_999;
 
@@ -45,7 +45,7 @@ fn lock_managed_port<'a>() -> std::sync::MutexGuard<'a, Option<u16>> {
     }
 }
 
-/// `true` si el error suele indicar que el puerto TCP local ya está en uso (Windows + Unix).
+/// `true` when the error usually means the local TCP port is already taken (Windows + Unix).
 pub(crate) fn tcp_bind_addr_in_use(err: &io::Error) -> bool {
     matches!(err.kind(), io::ErrorKind::AddrInUse)
         || err.raw_os_error() == Some(10048) // WSAEADDRINUSE
@@ -102,8 +102,8 @@ fn tcp_bind_ephemeral_ipv4_port_with_backoff() -> Result<u16, String> {
     ))
 }
 
-/// Elige un puerto en loopback IPv4 para `llama-server`: rango dedicado Flowmates primero,
-/// luego `:0` con reintentos.
+/// Picks an IPv4 loopback port for `llama-server`: the dedicated Flowmates range
+/// first, then `:0` with retries.
 pub fn pick_localhost_listen_port() -> Result<u16, String> {
     if let Some(p) = pick_port_in_preferred_range() {
         return Ok(p);

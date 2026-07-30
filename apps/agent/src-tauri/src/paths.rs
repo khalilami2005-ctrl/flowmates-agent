@@ -40,13 +40,13 @@ pub fn app_data_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// Path a `dev-agent.db`. Crea el directorio padre si hace falta.
+/// Path to `dev-agent.db`. Creates the parent directory when needed.
 pub fn db_path() -> Result<PathBuf, String> {
     Ok(app_data_dir()?.join(DB_FILE))
 }
 
-/// Variante infalible para sitios donde no podemos propagar Result (panic hooks,
-/// static init). En ese caso cae a `.` que es subóptimo pero no panica.
+/// Infallible variant for places that cannot propagate a `Result` — panic hooks,
+/// static initialisation. It falls back to `.`, which is poor but never panics.
 pub fn db_path_or_fallback() -> PathBuf {
     db_path().unwrap_or_else(|_| PathBuf::from(DB_FILE))
 }
@@ -80,7 +80,8 @@ pub fn screenshots_tmp_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// Detecta bloqueos de escritura (p. ej. **Controlled Folder Access**, ACL, AV) antes de confiar en SQLite.
+/// Detects write blocks — **Controlled Folder Access**, ACLs, antivirus — before
+/// we trust SQLite with anything.
 pub fn verify_app_dir_filesystem_writable() -> Result<(), String> {
     let dir = app_data_dir()?;
     let probe = dir.join(".flowmates_fs_write_probe");
@@ -128,7 +129,7 @@ pub fn prune_screenshots_tmp_older_than(max_age: std::time::Duration) -> Result<
     Ok(removed)
 }
 
-/// Resuelve el directorio de recursos bundlados donde vive `local_llm/`.
+/// Resolves the bundled-resources directory where `local_llm/` lives.
 ///
 /// In an installed `.exe`, Tauri unpacks `bundle.resources` into
 /// `<install>\resources\`. In dev, `resource_dir` points at cargo's target
