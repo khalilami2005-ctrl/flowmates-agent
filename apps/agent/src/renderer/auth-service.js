@@ -94,6 +94,39 @@ export async function fetchUserEntitlements(supabase) {
   return parseEntitlements(data);
 }
 
+/**
+ * Hand the supabase-js client a session that was obtained elsewhere.
+ *
+ * Google sign-in runs entirely on the Rust side: the agent opens the browser,
+ * catches the callback on its local port and keeps the tokens in SQLite. The
+ * client in this file never sees that exchange, so it stays anonymous — and
+ * every `supabase.rpc(...)` below reaches Postgres with no `auth.uid()`, which
+ * is why claiming a licence failed with "You must be signed in".
+ *
+ * Only the password flow used to authenticate this client, because it is the
+ * one that calls signInWithPassword() here.
+ *
+ * Returns false rather than throwing: an expired refresh token must not break
+ * the caller's flow, it just means the cloud RPCs stay unavailable.
+ */
+export async function adoptExternalSession(supabase, accessToken, refreshToken) {
+  if (!supabase || !accessToken || !refreshToken) return false;
+
+  const { data } = await supabase.auth.getSession();
+  if (data?.session?.access_token === accessToken) return true;
+
+  const { error } = await supabase.auth.setSession({
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  });
+
+  if (error) {
+    console.warn('[Auth] Could not adopt the agent session:', error.message);
+    return false;
+  }
+  return true;
+}
+
 export async function ensurePersonalTeam(supabase) {
   const { data, error } = await supabase.rpc('ensure_personal_team');
   if (error) {

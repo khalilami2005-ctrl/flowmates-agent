@@ -3648,6 +3648,23 @@
           </button>
         </div>
 
+        <!-- force_sync_now was registered in lib.rs:53 but nothing called it, so
+             the only way to sync was to wait out the 10-minute timer in
+             sync.rs:40 with no idea when it would fire. -->
+        <div class="card" id="cloudSyncCard" style="display: none;">
+          <div class="card-header">
+            <div class="card-title">Cloud sync</div>
+          </div>
+          <p class="upgrade-hint" style="margin-bottom: 12px;">
+            Sessions upload automatically every 10 minutes. Use this to send them now.
+          </p>
+          <button type="button" class="button button-secondary" id="forceSyncBtn" style="width:100%;">
+            Sync now
+          </button>
+          <div id="forceSyncStatus"
+               style="font-size: 10px; color: hsl(var(--muted-foreground)); margin-top: 6px;"></div>
+        </div>
+
         <div class="card" id="privacyAnalyticsCard">
           <div class="card-header">
             <div class="card-title">Privacy &amp; analytics</div>
@@ -3734,6 +3751,14 @@
         </svg>
         <span class="nav-label">Summary</span>
       </button>
+      <!-- Pro tab — hidden on purpose, to be restored.
+           Everything it drives is still here and still wired: the #tabCloudInsights
+           panel, the coach chat, updateCoachLockState(), and the `if (navCloud)`
+           branches that style it by entitlement. Only the way in is gone.
+           The two switchTab('tabCloudInsights') calls fire from inside that panel,
+           so they are unreachable rather than broken.
+           To bring it back, uncomment this button — nothing else to change. -->
+      <!--
       <button class="nav-item nav-pro nav-pro-locked" data-tab="tabCloudInsights" id="navCloudInsights">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
@@ -3741,6 +3766,7 @@
         </svg>
         <span class="nav-label" id="navCloudInsightsLabel">Pro</span>
       </button>
+      -->
       <button class="nav-item" data-tab="tabProfile" id="navProfile">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
@@ -3782,6 +3808,7 @@
     import { relaunch } from '@tauri-apps/plugin-process';
     import { jsPDF } from 'jspdf';
     import {
+      adoptExternalSession,
       claimLicenseCode,
       ensurePersonalTeam,
       getFriendlyAuthError,
@@ -3954,6 +3981,15 @@
 
       try {
         const supabase = getSupabaseClient();
+
+        // Re-assert the session here too. restoreCloudSession() already does it,
+        // but it runs at startup — a sign-in that happened afterwards, or a
+        // supabase-js session that lapsed since, would otherwise send this RPC
+        // anonymously and surface "You must be signed in" to someone who is.
+        if (!(await shareSessionWithSupabase())) {
+          throw new Error('Sign in first, then activate your license.');
+        }
+
         await claimLicenseCode(supabase, code);
 
         let entitlements = await invoke('refresh_entitlements');
@@ -3994,7 +4030,14 @@
       const manualTask = document.getElementById('manualTask');
       const syncToJiraWrapper = document.getElementById('syncToJiraWrapper');
       const licenseCard = document.getElementById('licenseActivationCard');
+      const cloudSyncCard = document.getElementById('cloudSyncCard');
       const canIntegrate = Boolean(currentEntitlements?.can_integrations);
+
+      // force_sync_now() itself calls require_feature(&db, "sync"), so showing
+      // the card without the right would only offer a button that refuses.
+      if (cloudSyncCard) {
+        cloudSyncCard.style.display = currentEntitlements?.can_sync ? '' : 'none';
+      }
 
       if (!badge) return;
 
@@ -4139,6 +4182,24 @@
     window.addEventListener('unhandledrejection', (event) => reportRuntimeError(event.reason));
 
     // ===== AUTH FUNCTIONS =====
+
+    // The supabase-js client needs the same session the Rust side holds, or the
+    // RPCs called from this page (claim_license, ensure_personal_team) arrive
+    // anonymous. Never throws: losing the cloud RPCs must not break sign-in.
+    async function shareSessionWithSupabase() {
+      if (!authSession?.access_token || !authSession?.refresh_token) return false;
+      try {
+        return await adoptExternalSession(
+          getSupabaseClient(),
+          authSession.access_token,
+          authSession.refresh_token,
+        );
+      } catch (e) {
+        console.warn('[Auth] Session hand-off failed:', e);
+        return false;
+      }
+    }
+
     async function restoreCloudSession() {
       await loadEntitlementsFromBackend();
 
@@ -4147,6 +4208,7 @@
         if (session) {
           authSession = session;
           currentUser = session.user;
+          await shareSessionWithSupabase();
           await invoke('refresh_entitlements').then(persistEntitlements).catch(() => {});
           updateProfileHeader();
           return true;
@@ -4170,6 +4232,7 @@
             },
           };
           currentUser = authSession.user;
+          await shareSessionWithSupabase();
           await invoke('refresh_entitlements').then(persistEntitlements).catch(() => {});
           updateProfileHeader();
           await loadUserTeams();
@@ -4947,6 +5010,31 @@
     document.getElementById('activateCloudBtn').onclick = handleActivateCloudClick;
     document.getElementById('closeCloudActivationBtn').onclick = hideCloudActivationPanel;
     document.getElementById('claimLicenseBtn').onclick = handleClaimLicense;
+
+    async function handleForceSync() {
+      const btn = document.getElementById('forceSyncBtn');
+      const status = document.getElementById('forceSyncStatus');
+      if (!btn) return;
+
+      btn.disabled = true;
+      if (status) status.textContent = 'Uploading…';
+      try {
+        // force_sync_now returns a human-readable report of what it sent.
+        const result = await invoke('force_sync_now');
+        if (status) status.textContent = String(result || 'Done.');
+        showToast('Sync complete', 'success');
+      } catch (error) {
+        const message = String(error?.message || error || 'Sync failed.');
+        if (status) status.textContent = message;
+        showToast(message, 'error', 4500);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById('forceSyncBtn')?.addEventListener('click', () => {
+      handleForceSync();
+    });
 
     const COACH_MAX_CHARS = 500;
     let coachMessages = [];
