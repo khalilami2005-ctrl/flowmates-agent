@@ -4,8 +4,8 @@
 pub(crate) fn parse_analysis(raw: &str) -> (String, String) {
     let lower = raw.to_lowercase();
 
-    let category = extract_category_from_field(&lower)
-        .unwrap_or_else(|| infer_category_from_content(&lower));
+    let category =
+        extract_category_from_field(&lower).unwrap_or_else(|| infer_category_from_content(&lower));
 
     let description = build_structured_description(raw);
 
@@ -134,7 +134,10 @@ fn infer_category_from_content(lower: &str) -> String {
         || lower.contains("github.com")
     {
         "Browsing"
-    } else if lower.contains("idle") || lower.contains("no activity") || lower.contains("lock screen") {
+    } else if lower.contains("idle")
+        || lower.contains("no activity")
+        || lower.contains("lock screen")
+    {
         "Idle"
     } else {
         "General"
@@ -176,9 +179,7 @@ fn build_structured_description(raw: &str) -> String {
             continue;
         }
 
-        let is_field = fields
-            .iter()
-            .any(|f| clean.to_uppercase().starts_with(f));
+        let is_field = fields.iter().any(|f| clean.to_uppercase().starts_with(f));
         if is_field {
             parts.push(clean.to_string());
         } else {

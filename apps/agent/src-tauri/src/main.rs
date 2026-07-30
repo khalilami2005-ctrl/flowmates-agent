@@ -101,15 +101,13 @@ fn harden_process_early() {
                 let nout = open_nul(nul_wide.as_ptr(), false);
                 let nerr = open_nul(nul_wide.as_ptr(), false);
                 let invalid = !0usize as *mut c_void;
-                let set_or_null =
-                    |h: *mut c_void, std_h: u32| {
-                        if h.is_null() || h == invalid {
-                            let _ =
-                                SetStdHandle(std_h, std::ptr::null_mut::<c_void>());
-                        } else {
-                            let _ = SetStdHandle(std_h, h);
-                        }
-                    };
+                let set_or_null = |h: *mut c_void, std_h: u32| {
+                    if h.is_null() || h == invalid {
+                        let _ = SetStdHandle(std_h, std::ptr::null_mut::<c_void>());
+                    } else {
+                        let _ = SetStdHandle(std_h, h);
+                    }
+                };
 
                 set_or_null(nin, STD_INPUT_HANDLE);
                 set_or_null(nout, STD_OUTPUT_HANDLE);
@@ -120,59 +118,98 @@ fn harden_process_early() {
     }
 }
 
+/// Loads `.env.local` from the repository root, in development builds only.
+///
+/// Vite already feeds the renderer from that file; without this the Rust side
+/// stayed blind under `tauri dev`, so cloud commands reported themselves
+/// unconfigured while the renderer held a perfectly good configuration.
+///
+/// Deliberately `debug_assertions`-only: a shipped binary must never read paths
+/// relative to a repository that does not exist on the user's machine.
+#[cfg(debug_assertions)]
+fn load_repo_env() {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let mut dir = exe.parent().map(|p| p.to_path_buf());
+    while let Some(current) = dir {
+        for name in [".env.local", ".env"] {
+            let candidate = current.join(name);
+            if candidate.is_file() {
+                let _ = dotenv::from_filename(&candidate);
+            }
+        }
+        if current.join("pnpm-workspace.yaml").is_file() {
+            return;
+        }
+        dir = current.parent().map(|p| p.to_path_buf());
+    }
+}
+
 fn main() {
-  // Must be first: blocks AppInit_DLLs before user32.dll is loaded.
-  // See the module-level comment above for the full rationale.
-  #[cfg(windows)]
-  harden_process_early();
+    // Must be first: blocks AppInit_DLLs before user32.dll is loaded.
+    // See the module-level comment above for the full rationale.
+    #[cfg(windows)]
+    harden_process_early();
 
-  // We do not read `.env.local` or repo-relative paths at runtime: they do not
-  // exist on other PCs and must not be part of installed behaviour. The installed
-  // `.exe` accepts only a `.env` beside the executable, as an optional override.
-  //
-  // There is no compiled-in fallback: with no backend configured, cloud features
-  // report themselves unavailable rather than reaching a default host. See
-  // `sync_env.rs`.
-  if let Ok(exe) = std::env::current_exe() {
-    if let Some(dir) = exe.parent() {
-      let _ = dotenv::from_filename(dir.join(".env"));
+    // An installed `.exe` reads no repo-relative path — those do not exist on other
+    // PCs and must not be part of installed behaviour. It accepts only a `.env`
+    // beside the executable, as an optional override.
+    //
+    // There is no compiled-in fallback: with no backend configured, cloud features
+    // report themselves unavailable rather than reaching a default host. See
+    // `sync_env.rs`.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let _ = dotenv::from_filename(dir.join(".env"));
+        }
     }
-  }
 
-  // Panic hook: in release the .exe has no stdout, so any panic — including one
-  // closing the window during a Google sign-in — used to be lost. We dump it to
-  // %LOCALAPPDATA%\Flowmates\crash.log, and to the tauri-plugin-log logger once
-  // that is installed.
-  std::panic::set_hook(Box::new(|info| {
-    let msg = format!(
-      "[{}] PANIC: {}\nLocation: {}\n\n",
-      chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-      info.payload()
-        .downcast_ref::<&str>()
-        .copied()
-        .or_else(|| info.payload().downcast_ref::<String>().map(|s| s.as_str()))
-        .unwrap_or("<non-string panic>"),
-      info.location()
-        .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
-        .unwrap_or_else(|| "<unknown>".into()),
-    );
-    eprintln!("{}", msg);
-    log::error!("{}", msg);
-    let path = app_lib::paths::crash_log_path_or_fallback();
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
-      let _ = f.write_all(msg.as_bytes());
+    #[cfg(debug_assertions)]
+    load_repo_env();
+
+    // State the backend situation once, out loud. Silence here used to mean a
+    // developer could not tell an unconfigured build from a misconfigured one.
+    eprintln!("[Flowmates] backend: {}", app_lib::backend_status());
+
+    // Panic hook: in release the .exe has no stdout, so any panic — including one
+    // closing the window during a Google sign-in — used to be lost. We dump it to
+    // %LOCALAPPDATA%\Flowmates\crash.log, and to the tauri-plugin-log logger once
+    // that is installed.
+    std::panic::set_hook(Box::new(|info| {
+        let msg = format!(
+            "[{}] PANIC: {}\nLocation: {}\n\n",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+            info.payload()
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| info.payload().downcast_ref::<String>().map(|s| s.as_str()))
+                .unwrap_or("<non-string panic>"),
+            info.location()
+                .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+                .unwrap_or_else(|| "<unknown>".into()),
+        );
+        eprintln!("{}", msg);
+        log::error!("{}", msg);
+        let path = app_lib::paths::crash_log_path_or_fallback();
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            let _ = f.write_all(msg.as_bytes());
+        }
+    }));
+
+    #[cfg(windows)]
+    {
+        // WebView2 overlay scrollbars ignore ::-webkit-scrollbar CSS; force classic bars.
+        std::env::set_var(
+            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+            "--disable-features=msWebView2OverlayScrollbar,OverlayScrollbar",
+        );
     }
-  }));
 
-  #[cfg(windows)]
-  {
-    // WebView2 overlay scrollbars ignore ::-webkit-scrollbar CSS; force classic bars.
-    std::env::set_var(
-      "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-      "--disable-features=msWebView2OverlayScrollbar,OverlayScrollbar",
-    );
-  }
-
-  app_lib::run();
+    app_lib::run();
 }

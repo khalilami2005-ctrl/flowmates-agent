@@ -1,38 +1,36 @@
-mod vision_model;
-mod llama_port;
-mod llama_windows_job;
-mod screenshot_disk;
 mod agent;
 mod agent_pure;
-mod jira;
-mod sync_env;
-mod sync_pure;
-mod sync;
+mod anonymous_analytics;
 mod auth;
-mod linear;
-mod oauth_env;
+mod coach_chat;
+pub mod context;
 mod entitlements;
 mod insights_local;
-mod coach_chat;
-mod user_preferences;
-mod anonymous_analytics;
-pub mod context;
+mod jira;
+mod linear;
+mod llama_port;
+mod llama_windows_job;
+mod oauth_env;
 pub mod paths;
+mod screenshot_disk;
+mod sync;
+mod sync_env;
+mod sync_pure;
+mod user_preferences;
+mod vision_model;
 
 use tauri::Manager;
 
 use agent::{
-    AgentState, initialize_agent, get_config, update_config,
-    get_status, start_monitoring, stop_monitoring,
-    capture_screen_command, save_activity,
-    get_activity_log, get_today_history, get_week_summary,
-    check_ollama, check_local_server,
+    capture_screen_command, check_local_server, check_ollama, get_activity_log, get_config,
+    get_status, get_today_history, get_week_summary, initialize_agent,
     llama_managed_process_status, llama_server_log_tail, restart_llama_server_cpu_only,
+    save_activity, start_monitoring, stop_monitoring, update_config, AgentState,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
+    tauri::Builder::default()
         .manage(AgentState::default())
         .invoke_handler(tauri::generate_handler![
             initialize_agent,
@@ -41,11 +39,11 @@ pub fn run() {
             get_status,
             start_monitoring,
             stop_monitoring,
-    capture_screen_command,
-    save_activity,
-    get_activity_log,
-    check_ollama,
-    check_local_server,
+            capture_screen_command,
+            save_activity,
+            get_activity_log,
+            check_ollama,
+            check_local_server,
             agent::capture_context_snapshot,
             jira::fetch_jira_tasks,
             jira::start_jira_oauth,
@@ -95,34 +93,51 @@ pub fn run() {
             paths::save_pdf_to_downloads,
             paths::open_path_in_file_manager,
         ])
-    .setup(|app| {
-      if let Some(window) = app.get_webview_window("main") {
-        let _ = window.set_theme(Some(tauri::Theme::Light));
-      }
+        .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_theme(Some(tauri::Theme::Light));
+            }
 
-      // Self-update support (GitHub Releases). Desktop-only; mobile targets skip it.
-      // `process` provides relaunch() so the frontend can restart after installing.
-      #[cfg(desktop)]
-      {
-        app.handle().plugin(tauri_plugin_process::init())?;
-        app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
-      }
+            // Self-update support (GitHub Releases). Desktop-only; mobile targets skip it.
+            // `process` provides relaunch() so the frontend can restart after installing.
+            #[cfg(desktop)]
+            {
+                app.handle().plugin(tauri_plugin_process::init())?;
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
 
-      // Log to file in ALL builds. In release the user never sees stderr, so
-      // without this there is no way to diagnose a post-login crash. Files land
-      // in %LOCALAPPDATA%\eu.flowmates.windows\logs\ on Windows, or the OS
-      // equivalent chosen by tauri-plugin-log.
-      app.handle().plugin(
-        tauri_plugin_log::Builder::default()
-          .level(log::LevelFilter::Info)
-          .targets([
-            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None }),
-          ])
-          .build(),
-      )?;
-      Ok(())
-    })
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+            // Log to file in ALL builds. In release the user never sees stderr, so
+            // without this there is no way to diagnose a post-login crash. Files land
+            // in %LOCALAPPDATA%\eu.flowmates.windows\logs\ on Windows, or the OS
+            // equivalent chosen by tauri-plugin-log.
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .targets([
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                            file_name: None,
+                        }),
+                    ])
+                    .build(),
+            )?;
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+/// One-line description of the backend configuration, for startup logging.
+///
+/// Never echoes the key: only whether one is present. A log line that leaks a
+/// credential is worse than no log line at all.
+pub fn backend_status() -> String {
+    let url = sync_env::supabase_url();
+    let has_key = !sync_env::supabase_anon_key().is_empty();
+    match (url.is_empty(), has_key) {
+        (true, _) => "none configured — local measurement only".to_string(),
+        (false, false) => format!("{url} (NO KEY — cloud stays unavailable)"),
+        (false, true) => format!("{url} (key present)"),
+    }
 }

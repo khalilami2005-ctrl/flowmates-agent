@@ -9,14 +9,21 @@ use tauri::Emitter;
 use crate::vision_model::LLAMA_CHAT_MODEL_ID;
 
 const FOCUS_CATEGORIES: &[&str] = &[
-    "Coding", "Debugging", "CodeReview", "Testing", "Design", "DevOps", "Database",
+    "Coding",
+    "Debugging",
+    "CodeReview",
+    "Testing",
+    "Design",
+    "DevOps",
+    "Database",
 ];
 const DISTRACTION_CATEGORIES: &[&str] = &["Browsing", "Idle"];
 
 /// Per-section LLM context from SQLite aggregates (separate calls, richer than a single snapshot).
 const LLM_SECTION_STATS_MAX_CHARS: usize = 2800;
 
-const REPORT_SYSTEM_PROMPT: &str = "You are an expert productivity consultant writing detailed work status reports. \
+const REPORT_SYSTEM_PROMPT: &str =
+    "You are an expert productivity consultant writing detailed work status reports. \
 CRITICAL: English only. Output valid JSON only — no markdown. \
 Cite specific dates, ticket IDs, hours, categories, and task descriptions from the provided STATS. \
 Be concrete and actionable; avoid generic filler. \
@@ -83,7 +90,10 @@ struct ActivitySample {
 }
 
 /// Aggregated local SQLite activity for cloud AI reports (Individual plan).
-pub fn build_local_insights_report(db_path: &std::path::Path, period_days: i32) -> Result<serde_json::Value, String> {
+pub fn build_local_insights_report(
+    db_path: &std::path::Path,
+    period_days: i32,
+) -> Result<serde_json::Value, String> {
     let days = period_days.clamp(1, 30);
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
 
@@ -419,17 +429,38 @@ pub fn generate_local_status_report(
     let local_data = build_local_insights_report(&db_path, days)?;
 
     let app_handle = app.clone();
-    emit_report_progress(&app_handle, 0, "warmup", "Starting local AI engine", "Preparing model…", "start");
+    emit_report_progress(
+        &app_handle,
+        0,
+        "warmup",
+        "Starting local AI engine",
+        "Preparing model…",
+        "start",
+    );
     crate::agent::ensure_local_llm_ready(app, state)?;
-    emit_report_progress(&app_handle, 0, "warmup", "Starting local AI engine", "Local AI ready", "done");
+    emit_report_progress(
+        &app_handle,
+        0,
+        "warmup",
+        "Starting local AI engine",
+        "Local AI ready",
+        "done",
+    );
 
     let user_prefs = crate::user_preferences::load_user_preferences(&db_path).unwrap_or_default();
     let prefs_block = crate::user_preferences::preferences_llm_block(&user_prefs);
 
-    let (report, generation_passes) = match generate_report_by_sections(&app_handle, &local_data, &prefs_block) {
+    let (report, generation_passes) = match generate_report_by_sections(
+        &app_handle,
+        &local_data,
+        &prefs_block,
+    ) {
         Ok(result) => result,
         Err(err) => {
-            log::warn!("[LocalReport] Pipeline incomplete ({}), merging partial + structured fallback", err);
+            log::warn!(
+                "[LocalReport] Pipeline incomplete ({}), merging partial + structured fallback",
+                err
+            );
             let mut fallback = build_rule_based_report(&local_data);
             sanitize_report_english(&mut fallback);
             (
@@ -471,9 +502,8 @@ fn call_local_llm_with_system(
     temperature: f32,
     system_prompt: &str,
 ) -> Result<String, String> {
-    let chat_url = crate::llama_port::managed_chat_completions_url().ok_or_else(|| {
-        "Local AI server offline.".to_string()
-    })?;
+    let chat_url = crate::llama_port::managed_chat_completions_url()
+        .ok_or_else(|| "Local AI server offline.".to_string())?;
 
     let client = Client::builder()
         .timeout(Duration::from_secs(LLM_PASS_TIMEOUT_SECS))
@@ -503,7 +533,10 @@ fn call_local_llm_with_system(
     if !resp.status().is_success() {
         let status = resp.status();
         let err_body = resp.text().unwrap_or_default();
-        return Err(format!("Local AI request failed ({}): {}", status, err_body));
+        return Err(format!(
+            "Local AI request failed ({}): {}",
+            status, err_body
+        ));
     }
 
     let json: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
@@ -520,19 +553,24 @@ fn call_local_llm_with_system(
     Ok(raw)
 }
 
-fn call_local_llm_json(prompt: &str, max_tokens: u32, temperature: f32) -> Result<serde_json::Value, String> {
+fn call_local_llm_json(
+    prompt: &str,
+    max_tokens: u32,
+    temperature: f32,
+) -> Result<serde_json::Value, String> {
     let json_hint = "\n\nReturn valid JSON only. Up to 6 array items; cite specific STATS facts in each string.";
     let mut last_err = String::from("unknown error");
 
     for attempt in 0..=LLM_PASS_RETRIES {
-        let user_prompt = if attempt == 0 {
-            format!("{}{}", prompt, json_hint)
-        } else {
-            format!(
+        let user_prompt =
+            if attempt == 0 {
+                format!("{}{}", prompt, json_hint)
+            } else {
+                format!(
                 "{}{}\n\n(RETRY {}/{}) Return valid JSON. English only. Keep schema, be specific.",
                 prompt, json_hint, attempt + 1, LLM_PASS_RETRIES + 1
             )
-        };
+            };
 
         let raw = match call_local_llm(&user_prompt, max_tokens, temperature) {
             Ok(r) => r,
@@ -546,7 +584,11 @@ fn call_local_llm_json(prompt: &str, max_tokens: u32, temperature: f32) -> Resul
             Ok(v) => return Ok(v),
             Err(e) => {
                 last_err = e.clone();
-                log::warn!("[LocalReport] JSON parse attempt {} failed: {}", attempt + 1, e);
+                log::warn!(
+                    "[LocalReport] JSON parse attempt {} failed: {}",
+                    attempt + 1,
+                    e
+                );
                 if attempt < LLM_PASS_RETRIES {
                     if let Ok(fixed) = call_local_llm(
                         &format!(
@@ -630,7 +672,14 @@ fn llm_section(
     fallback: serde_json::Value,
     passes: &mut Vec<serde_json::Value>,
 ) -> serde_json::Value {
-    emit_report_progress(app, step, pass_id, label, "Generating with local AI…", "start");
+    emit_report_progress(
+        app,
+        step,
+        pass_id,
+        label,
+        "Generating with local AI…",
+        "start",
+    );
     log::info!("[LocalReport] Section {} — {}", step, pass_id);
     let prompt = format!("{}\n\nSTATS:\n{}", prompt_body, stats);
     let result = call_local_llm_json(&prompt, max_tokens, temperature).unwrap_or_else(|err| {
@@ -675,7 +724,8 @@ fn generate_report_by_sections(
 ) -> Result<(serde_json::Value, Vec<serde_json::Value>), String> {
     let mut passes = Vec::new();
     let rule_fallback = build_rule_based_report(local_data);
-    let stats = |section_id: &str| build_section_stats_snapshot(section_id, local_data, prefs_block);
+    let stats =
+        |section_id: &str| build_section_stats_snapshot(section_id, local_data, prefs_block);
 
     let project = llm_section(
         app,
@@ -925,7 +975,8 @@ fn build_section_stats_snapshot(
     if !prefs_block.is_empty() {
         lines.push(prefs_block.to_string());
         lines.push(
-            "Personalize insights for USER_PROFILE roles, activities, and improvement goals.".to_string(),
+            "Personalize insights for USER_PROFILE roles, activities, and improvement goals."
+                .to_string(),
         );
     }
 
@@ -1012,10 +1063,16 @@ fn append_health_metrics(lines: &mut Vec<String>, local_data: &serde_json::Value
     let ticketed_h = local_data["ticketed_hours"].as_f64().unwrap_or(0.0);
     let unticketed_h = local_data["unticketed_hours"].as_f64().unwrap_or(0.0);
     let active_days = local_data["active_days"].as_i64().unwrap_or(0);
-    let consistency = local_data["tracking_consistency_pct"].as_f64().unwrap_or(0.0);
+    let consistency = local_data["tracking_consistency_pct"]
+        .as_f64()
+        .unwrap_or(0.0);
     let avg_session = local_data["avg_session_minutes"].as_f64().unwrap_or(0.0);
-    let deep_focus = local_data["deep_focus_sessions_30m_plus"].as_i64().unwrap_or(0);
-    let switches = local_data["context_switches_per_day"].as_f64().unwrap_or(0.0);
+    let deep_focus = local_data["deep_focus_sessions_30m_plus"]
+        .as_i64()
+        .unwrap_or(0);
+    let switches = local_data["context_switches_per_day"]
+        .as_f64()
+        .unwrap_or(0.0);
     let unsynced = local_data["unsynced_reports"].as_i64().unwrap_or(0);
 
     lines.push(format!(
@@ -1240,7 +1297,10 @@ fn append_distraction_detail(lines: &mut Vec<String>, local_data: &serde_json::V
             if DISTRACTION_CATEGORIES.contains(&name) {
                 let mins = cat["total_seconds"].as_i64().unwrap_or(0) / 60;
                 let n = cat["count"].as_i64().unwrap_or(0);
-                lines.push(format!("- DISTRACTION {}: {}m across {} events", name, mins, n));
+                lines.push(format!(
+                    "- DISTRACTION {}: {}m across {} events",
+                    name, mins, n
+                ));
             }
         }
     }
@@ -1262,12 +1322,22 @@ fn truncate_json_compact(value: &serde_json::Value, max_chars: usize) -> String 
 }
 
 fn merge_diagnosis_into_draft(draft: &mut serde_json::Value, diagnosis: &serde_json::Value) {
-    if draft.get("overall_health").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+    if draft
+        .get("overall_health")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .is_empty()
+    {
         if let Some(h) = diagnosis.get("overall_health") {
             draft["overall_health"] = h.clone();
         }
     }
-    if draft.get("health_notes").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+    if draft
+        .get("health_notes")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .is_empty()
+    {
         if let Some(n) = diagnosis.get("health_notes") {
             draft["health_notes"] = n.clone();
         }
@@ -1442,7 +1512,8 @@ fn build_rule_based_report(local_data: &serde_json::Value) -> serde_json::Value 
 
     let focus_seconds = local_data["focus_seconds"].as_i64().unwrap_or(0) as i32;
     let total_seconds = local_data["total_seconds"].as_i64().unwrap_or(0) as i32;
-    let overall_health = compute_overall_health(focus_seconds, total_seconds, distraction_events as i32);
+    let overall_health =
+        compute_overall_health(focus_seconds, total_seconds, distraction_events as i32);
 
     let health_breakdown = build_category_health_rows(local_data);
     let tasks_completed = build_tasks_completed(local_data);
@@ -1492,9 +1563,15 @@ Ticket-linked work covered {:.0}% of hours.",
         "No tracked activity in this period. Start monitoring to build a baseline.".to_string()
     } else {
         let focus_pct = local_data["focus_ratio_pct"].as_f64().unwrap_or(0.0);
-        let deep = local_data["deep_focus_sessions_30m_plus"].as_i64().unwrap_or(0);
-        let consistency = local_data["tracking_consistency_pct"].as_f64().unwrap_or(0.0);
-        let switches = local_data["context_switches_per_day"].as_f64().unwrap_or(0.0);
+        let deep = local_data["deep_focus_sessions_30m_plus"]
+            .as_i64()
+            .unwrap_or(0);
+        let consistency = local_data["tracking_consistency_pct"]
+            .as_f64()
+            .unwrap_or(0.0);
+        let switches = local_data["context_switches_per_day"]
+            .as_f64()
+            .unwrap_or(0.0);
         let distraction_h = local_data["distraction_hours"].as_f64().unwrap_or(0.0);
         format!(
             "Focus work represents {:.0}% of tracked time with {} deep-focus sessions of 30+ minutes. \
@@ -1527,7 +1604,11 @@ Context switching averaged {:.1} category changes per active day.",
     })
 }
 
-fn compute_overall_health(focus_seconds: i32, total_seconds: i32, distraction_events: i32) -> &'static str {
+fn compute_overall_health(
+    focus_seconds: i32,
+    total_seconds: i32,
+    distraction_events: i32,
+) -> &'static str {
     if total_seconds == 0 {
         return "Attention";
     }
@@ -1649,7 +1730,10 @@ fn build_tasks_completed(local_data: &serde_json::Value) -> Vec<String> {
     }
 
     if items.is_empty() {
-        items.push("No completed tasks identified — capture more activity to populate this section.".to_string());
+        items.push(
+            "No completed tasks identified — capture more activity to populate this section."
+                .to_string(),
+        );
     }
 
     items
@@ -1688,7 +1772,9 @@ fn build_known_issues(local_data: &serde_json::Value, distraction_events: i32) -
         ));
     }
 
-    let consistency = local_data["tracking_consistency_pct"].as_f64().unwrap_or(100.0);
+    let consistency = local_data["tracking_consistency_pct"]
+        .as_f64()
+        .unwrap_or(100.0);
     if consistency < 60.0 {
         issues.push(format!(
             "Tracking gaps — only {:.0}% of days in the period have SQLite activity reports.",
@@ -1703,7 +1789,11 @@ fn build_known_issues(local_data: &serde_json::Value, distraction_events: i32) -
     issues
 }
 
-fn build_potential_risks(local_data: &serde_json::Value, focus_seconds: i32, total_seconds: i32) -> Vec<String> {
+fn build_potential_risks(
+    local_data: &serde_json::Value,
+    focus_seconds: i32,
+    total_seconds: i32,
+) -> Vec<String> {
     let mut risks = Vec::new();
     if total_seconds > 0 {
         let focus_ratio = focus_seconds as f64 / total_seconds as f64;
@@ -1737,7 +1827,10 @@ fn build_potential_risks(local_data: &serde_json::Value, focus_seconds: i32, tot
     }
 
     if let Some(days) = local_data["daily_totals"].as_array() {
-        let active_days = days.iter().filter(|d| d["total_seconds"].as_i64().unwrap_or(0) > 0).count();
+        let active_days = days
+            .iter()
+            .filter(|d| d["total_seconds"].as_i64().unwrap_or(0) > 0)
+            .count();
         let period_days = local_data["period_days"].as_i64().unwrap_or(7) as usize;
         if active_days <= 2 && period_days >= 5 {
             risks.push(format!(
@@ -1747,7 +1840,9 @@ fn build_potential_risks(local_data: &serde_json::Value, focus_seconds: i32, tot
         }
     }
 
-    let switches = local_data["context_switches_per_day"].as_f64().unwrap_or(0.0);
+    let switches = local_data["context_switches_per_day"]
+        .as_f64()
+        .unwrap_or(0.0);
     if switches > 15.0 {
         risks.push(format!(
             "High context switching ({:.1} category changes per active day) may reduce sustained focus.",
@@ -1781,7 +1876,10 @@ fn build_work_progress(local_data: &serde_json::Value) -> Vec<String> {
             let hours = d["total_seconds"].as_i64().unwrap_or(0) as f64 / 3600.0;
             let count = d["activity_count"].as_i64().unwrap_or(0);
             if hours > 0.0 {
-                progress.push(format!("{} — {:.1}h across {} SQLite captures", date, hours, count));
+                progress.push(format!(
+                    "{} — {:.1}h across {} SQLite captures",
+                    date, hours, count
+                ));
             }
         }
     }
@@ -1821,7 +1919,10 @@ fn build_lessons_learned(
         }));
     }
 
-    if let Some(top) = local_data["category_breakdown"].as_array().and_then(|a| a.first()) {
+    if let Some(top) = local_data["category_breakdown"]
+        .as_array()
+        .and_then(|a| a.first())
+    {
         let cat = top["category"].as_str().unwrap_or("Work");
         lessons.push(serde_json::json!({
             "title": format!("Double down on {}", cat),
@@ -1842,8 +1943,10 @@ fn build_lessons_learned(
 
 fn default_recommendations(local_data: &serde_json::Value) -> Vec<String> {
     let mut recs = vec![
-        "Review top distraction categories and batch admin/browsing into fixed windows.".to_string(),
-        "Link tasks to Jira/Linear tickets when on a paid plan for clearer progress reporting.".to_string(),
+        "Review top distraction categories and batch admin/browsing into fixed windows."
+            .to_string(),
+        "Link tasks to Jira/Linear tickets when on a paid plan for clearer progress reporting."
+            .to_string(),
     ];
 
     if local_data["ticket_breakdown"]
@@ -1851,7 +1954,9 @@ fn default_recommendations(local_data: &serde_json::Value) -> Vec<String> {
         .map(|a| a.is_empty())
         .unwrap_or(true)
     {
-        recs.push("Assign tickets or manual task labels to improve task_completed sections.".to_string());
+        recs.push(
+            "Assign tickets or manual task labels to improve task_completed sections.".to_string(),
+        );
     }
 
     recs
@@ -1882,7 +1987,9 @@ fn query_prior_period_metrics(
         .map_err(|e| e.to_string())?;
 
     let rows: Vec<(String, i32)> = stmt
-        .query_map(params![start_str, end_str], |row| Ok((row.get(0)?, row.get(1)?)))
+        .query_map(params![start_str, end_str], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
@@ -1897,7 +2004,8 @@ fn query_prior_period_metrics(
     }
 
     let change_pct = if current_total_seconds > 0 && total_seconds > 0 {
-        ((current_total_seconds - total_seconds) as f64 / total_seconds as f64 * 1000.0).round() / 10.0
+        ((current_total_seconds - total_seconds) as f64 / total_seconds as f64 * 1000.0).round()
+            / 10.0
     } else if current_total_seconds > 0 && total_seconds == 0 {
         100.0
     } else {
@@ -1991,4 +2099,3 @@ fn clamp_line(s: &str, max_chars: usize) -> String {
     }
     s.chars().take(max_chars).collect::<String>() + "…"
 }
-
