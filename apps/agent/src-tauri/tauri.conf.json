@@ -55,7 +55,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENCQzhBQzY5OEEwQUE5NzAKUldSd3FRcUthYXpJeXhMQ2JHSmhZRHNjMjJFRGl2Qng3cW0rMFJEaWtzNGdZVGZQZUpsdm51THkK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgyQTQyODQ0OUNENEY5MTcKUldRWCtkU2NSQ2lrZ2d1TE1wdW1DQm85aVJtYWxNK1o2dnJNa3VCUEtrejVJM0VsM3E3WlIyRWEK",
       "endpoints": [
         "https://github.com/khalilami2005-ctrl/flowmates-agent/releases/latest/download/latest-windows.json"
       ],
