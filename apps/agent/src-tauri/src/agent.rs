@@ -53,12 +53,12 @@ impl Default for FlowmatesAgent {
 
 impl FlowmatesAgent {
     pub fn new() -> Self {
+        // The fallback deliberately stays inside the working directory rather
+        // than rebuilding the data path by hand: a second guess at where the
+        // data lives is how the session ended up in a database nothing read.
         let db_path = crate::paths::db_path().unwrap_or_else(|e| {
             log::error!("[Agent] paths::db_path unavailable ({}); using cwd fallback.", e);
-            dirs::data_local_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("Flowmates")
-                .join("dev-agent.db")
+            PathBuf::from("dev-agent.db")
         });
 
         if let Some(parent) = db_path.parent() {

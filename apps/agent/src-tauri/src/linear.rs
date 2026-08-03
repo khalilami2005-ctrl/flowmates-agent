@@ -11,10 +11,10 @@ pub struct LinearIssue {
 }
 
 fn get_db_conn() -> Result<Connection, String> {
-    let db_path = dirs::data_local_dir()
-        .unwrap()
-        .join("Flowmates")
-        .join("dev-agent.db");
+    // Through `paths`, never built by hand — see the note in `auth::get_db_conn`.
+    // The `unwrap()` this replaces also panicked outright on a machine with no
+    // local data directory.
+    let db_path = crate::paths::db_path()?;
     Connection::open(db_path).map_err(|e| e.to_string())
 }
 

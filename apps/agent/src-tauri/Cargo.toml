@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.0.1"
+version = "1.0.2"
 description = "Activity measurement for Windows, analysed by a local vision model"
 authors = ["you"]
 license = ""

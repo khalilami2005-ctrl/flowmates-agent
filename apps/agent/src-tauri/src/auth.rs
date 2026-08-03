@@ -865,17 +865,15 @@ fn fetch_user_info(provider: &str, access_token: &str) -> Result<AuthUser, Strin
 }
 
 fn get_db_conn() -> Result<Connection, String> {
-    // On a fresh install, %LOCALAPPDATA%\Flowmates\ does not exist until
-    // FlowmatesAgent::new() runs. The OAuth callback arrives BEFORE
-    // `initialize_agent` has run — the user is not signed in yet — so the directory
-    // has to be guaranteed here, or sqlite returns "unable to open database file"
-    // and the session is lost silently.
-    let base = dirs::data_local_dir().ok_or("No local data dir")?;
-    let dir = base.join("Flowmates");
-    if !dir.exists() {
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    }
-    let db_path = dir.join("dev-agent.db");
+    // The data folder does not exist until FlowmatesAgent::new() runs, and the
+    // OAuth callback arrives BEFORE `initialize_agent` has — the user is not
+    // signed in yet. `db_path()` creates the directory, so sqlite cannot fail
+    // with "unable to open database file" and lose the session silently.
+    //
+    // This must go through `paths`, never build the path by hand: this module
+    // once did, and when the data folder moved out of the install directory the
+    // session was still being written to the old location, where nothing read it.
+    let db_path = crate::paths::db_path()?;
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
     // Ensure the `config` table exists in case we are the first to open the DB
     // (before agent::init_db runs). Without this, later INSERTs also fail silently.

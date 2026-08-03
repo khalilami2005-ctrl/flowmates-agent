@@ -254,15 +254,28 @@ pub fn set_analytics_consent(consented: bool) -> Result<AnalyticsConsent, String
 
     let saved = save_analytics_consent(&db_path, consent)?;
 
-    if saved.consented {
-        sync_anonymous_analytics_to_supabase(&db_path, &saved)?;
+    // The choice is recorded locally above; telling the backend about it is a
+    // best effort. It used to propagate with `?`, which made a privacy
+    // preference depend on a network round-trip succeeding — and the first-launch
+    // dialog only closes when this command returns Ok. An offline user, or one
+    // on a build with no backend configured, was locked on that dialog with no
+    // way into the application. A failed upload is retried by
+    // `perform_analytics_sync` on a later launch.
+    let upload = if saved.consented {
+        sync_anonymous_analytics_to_supabase(&db_path, &saved)
     } else if saved.anonymous_id.is_some() {
         upsert_anonymous_analytics_on_supabase(
             saved.anonymous_id.as_deref().unwrap_or_default(),
             false,
             &[],
             None,
-        )?;
+        )
+    } else {
+        Ok(())
+    };
+
+    if let Err(e) = upload {
+        log::warn!("[Analytics] preference saved locally, upload deferred: {e}");
     }
 
     Ok(saved)
