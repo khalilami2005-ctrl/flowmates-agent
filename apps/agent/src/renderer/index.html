@@ -846,6 +846,11 @@
     }
 
     /* Progress Bar for Setup */
+    /* Hidden by default in the stylesheet, not by a `style="display:none"`
+       attribute. This element covers the whole window at z-index 3000, so if
+       anything ever stops inline style attributes from applying — a CSP hash
+       added to style-src silently disables 'unsafe-inline' for them — a default
+       of `flex` locks the user out of the app entirely. Visibility is a class. */
     .setup-overlay {
       position: fixed;
       top: 0;
@@ -855,12 +860,16 @@
       background: rgba(255, 255, 255, 0.9);
       backdrop-filter: blur(4px);
       z-index: 3000;
-      display: flex;
+      display: none;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       padding: 30px;
       text-align: center;
+    }
+
+    .setup-overlay.is-visible {
+      display: flex;
     }
 
     .progress-container {
@@ -3781,12 +3790,12 @@
   <div class="toast-container" id="toastContainer"></div>
 
   <!-- SETUP OVERLAY -->
-  <div id="setupOverlay" class="setup-overlay" style="display: none;">
-    <div class="setup-status" id="setupStatus">Configurando entorno de IA...</div>
+  <div id="setupOverlay" class="setup-overlay">
+    <div class="setup-status" id="setupStatus">Setting up the local AI…</div>
     <div class="progress-container">
       <div class="progress-bar" id="setupProgress"></div>
     </div>
-    <div class="setup-subtext" id="setupSubtext">Esto tomará unos minutos</div>
+    <div class="setup-subtext" id="setupSubtext">This may take a few minutes</div>
   </div>
 
   <!-- SETUP OVERLAY -->
@@ -5484,7 +5493,7 @@
       const subtext = document.getElementById('setupSubtext');
 
       const showStep = (status, sub = "Initializing...", pct = 0) => {
-        overlay.style.display = 'flex';
+        overlay.classList.add('is-visible');
         statusText.textContent = status;
         subtext.textContent = sub;
         progress.style.width = pct + '%';
@@ -5585,7 +5594,7 @@
           throw new Error("Unexpected server status: " + JSON.stringify(res));
         }
 
-        overlay.style.display = 'none';
+        overlay.classList.remove('is-visible');
         const layerSuffix =
           typeof res.gpuLayers === 'number'
             ? ` (${res.gpuLayers} GPU layers${res.gpuAuto ? ', auto-selected' : ''})`
@@ -5612,7 +5621,7 @@
         ollamaConfirmedOnline = true;
         await checkOllama();
       } catch (e) {
-        overlay.style.display = 'none';
+        overlay.classList.remove('is-visible');
         console.error("Start Failed:", e);
         showToast("Error: " + e, "error");
       } finally {
