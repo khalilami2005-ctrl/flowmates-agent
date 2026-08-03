@@ -33,6 +33,20 @@ use agent::{
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+        // Must be registered before anything else, so a second launch exits
+        // before it touches the database or the OAuth port.
+        //
+        // A second copy is never harmless here: the Google callback listener
+        // binds a hard-coded 127.0.0.1:12345 (auth.rs), so whichever instance
+        // starts second cannot sign in at all, and both write the same SQLite
+        // file. Re-launching now raises the window that is already open.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .manage(AgentState::default())
         .invoke_handler(tauri::generate_handler![
             initialize_agent,

@@ -431,6 +431,15 @@ fn probe_sqlite_database_rw() -> Result<(), String> {
     let db_path = crate::paths::db_path()?;
     let conn = Connection::open(&db_path)
         .map_err(|e| format!("SQLite cannot open {:?}: {e}", db_path))?;
+
+    // WAL is a property of the file, so setting it once here applies to every
+    // later connection: the capture loop writing a report no longer blocks the
+    // UI reading today's history. Best-effort — an older file that cannot be
+    // converted still works in rollback-journal mode.
+    if let Err(e) = conn.pragma_update(None, "journal_mode", "WAL") {
+        log::warn!("[Flowmates] could not enable WAL on the database: {e}");
+    }
+
     conn.execute_batch(
         "BEGIN IMMEDIATE;
          CREATE TEMP TABLE IF NOT EXISTS _flowmates_io_probe (x INTEGER);

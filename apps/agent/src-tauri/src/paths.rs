@@ -15,7 +15,28 @@ use std::path::PathBuf;
 use serde_json::json;
 use tauri::{AppHandle, Manager};
 
-const APP_DIR_NAME: &str = "Flowmates";
+/// Where user data lives, under `dirs::data_local_dir()`.
+///
+/// The bundle identifier, deliberately — not the product name. A per-user NSIS
+/// build installs into `%LOCALAPPDATA%\Flowmates`, so a data folder of the same
+/// name puts the database *inside the install directory*, and `uninstall.exe`
+/// takes the user's entire history down with the binaries. The identifier
+/// folder is where Tauri already keeps the logs and the WebView2 profile, and
+/// the uninstaller only clears it when the user explicitly asks it to.
+const APP_DIR_PARENT: &str = "eu.flowmates.windows";
+
+/// Release and dev builds get separate leaves. They used to share one folder:
+/// running `tauri dev` while an installed copy was open meant two processes
+/// writing the same SQLite file, with no WAL and no busy timeout.
+#[cfg(not(debug_assertions))]
+const APP_DIR_LEAF: &str = "data";
+#[cfg(debug_assertions)]
+const APP_DIR_LEAF: &str = "data-dev";
+
+/// Pre-1.0.1 location: `%LOCALAPPDATA%\Flowmates`, shared with the installed
+/// binaries. Read once at startup so existing users keep their history.
+const LEGACY_DIR_NAME: &str = "Flowmates";
+
 const DB_FILE: &str = "dev-agent.db";
 const SERVER_LOG_FILE: &str = "server.log";
 const AGENT_ERROR_LOG_FILE: &str = "agent_error.log";
@@ -33,11 +54,73 @@ const SCREENSHOTS_TMP_DIR: &str = "screenshots_tmp";
 /// directory is NOT writable by a standard user.
 pub fn app_data_dir() -> Result<PathBuf, String> {
     let base = dirs::data_local_dir().ok_or_else(|| "No local data dir available".to_string())?;
-    let dir = base.join(APP_DIR_NAME);
-    if !dir.exists() {
+    let dir = base.join(APP_DIR_PARENT).join(APP_DIR_LEAF);
+    let fresh = !dir.exists();
+    if fresh {
         std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create {:?}: {}", dir, e))?;
     }
+    if fresh {
+        adopt_existing_data(&base, &dir);
+    }
     Ok(dir)
+}
+
+/// Everything a user would lose. Logs are included so a crash report keeps its
+/// history; `local_llm` and the binaries are not — those the installer owns.
+const PORTABLE_FILES: [&str; 5] = [
+    DB_FILE,
+    SERVER_LOG_FILE,
+    AGENT_ERROR_LOG_FILE,
+    CRASH_LOG_FILE,
+    "auth.log",
+];
+
+/// One-time hand-over from the pre-1.0.1 layout, run only when the new folder
+/// has just been created.
+///
+/// A release build *moves* the old files: the legacy folder is the install
+/// directory and the uninstaller would delete them there. A dev build *copies*
+/// instead — stealing the database would leave the installed app blank, and dev
+/// is a second reader of the same history, not its owner.
+fn adopt_existing_data(base: &std::path::Path, dir: &std::path::Path) {
+    let legacy = base.join(LEGACY_DIR_NAME);
+
+    // A dev build prefers the release folder, which is where the data lands
+    // after the release build has migrated it once.
+    #[cfg(debug_assertions)]
+    let sources = [base.join(APP_DIR_PARENT).join("data"), legacy];
+    #[cfg(not(debug_assertions))]
+    let sources = [legacy];
+
+    for source in sources.iter() {
+        if !source.is_dir() || source == dir {
+            continue;
+        }
+        let mut adopted = 0usize;
+        for name in PORTABLE_FILES.iter() {
+            let from = source.join(name);
+            let to = dir.join(name);
+            if !from.is_file() || to.exists() {
+                continue;
+            }
+            #[cfg(not(debug_assertions))]
+            let moved = std::fs::rename(&from, &to).is_ok()
+                || (std::fs::copy(&from, &to).is_ok() && std::fs::remove_file(&from).is_ok());
+            #[cfg(debug_assertions)]
+            let moved = std::fs::copy(&from, &to).is_ok();
+
+            if moved {
+                adopted += 1;
+            }
+        }
+        if adopted > 0 {
+            log::info!(
+                "[Flowmates] adopted {adopted} file(s) from the previous data folder {}",
+                source.display()
+            );
+            return;
+        }
+    }
 }
 
 /// Path to `dev-agent.db`. Creates the parent directory when needed.

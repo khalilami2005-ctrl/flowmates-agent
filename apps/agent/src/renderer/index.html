@@ -21,29 +21,29 @@
       --foreground: 222.2 84% 4.9%;
       --card: 0 0% 100%;
       --card-foreground: 222.2 84% 4.9%;
-      --primary: 262 83% 58%;
+      --primary: 22 92% 39%;
       --primary-foreground: 210 40% 98%;
       --secondary: 210 40% 96.1%;
       --secondary-foreground: 222.2 47.4% 11.2%;
       --muted: 210 40% 96.1%;
       --muted-foreground: 215.4 16.3% 46.9%;
-      --accent: 262 83% 96%;
-      --accent-foreground: 262 83% 40%;
+      --accent: 28 95% 95%;
+      --accent-foreground: 22 92% 32%;
       --destructive: 0 84.2% 60.2%;
       --destructive-foreground: 210 40% 98%;
       --border: 214.3 31.8% 91.4%;
       --input: 214.3 31.8% 91.4%;
-      --ring: 262 83% 58%;
+      --ring: 22 92% 39%;
       --radius: 0.75rem;
-      --summary-purple: 262 83% 58%;
+      --summary-brand: 22 92% 41%;
       --summary-magenta: 320 70% 55%;
       --summary-blue: 221 83% 53%;
       --summary-teal: 174 60% 45%;
       --summary-orange: 25 95% 53%;
       --scrollbar-size: 7px;
-      --scrollbar-track: #ede9fe;
-      --scrollbar-thumb: #8b5cf6;
-      --scrollbar-thumb-hover: #7c3aed;
+      --scrollbar-track: #fdeee0;
+      --scrollbar-thumb: #f07b2e;
+      --scrollbar-thumb-hover: #d0620f;
     }
 
     html {
@@ -218,7 +218,7 @@
     .tab-content::-webkit-scrollbar-thumb,
     .app-container::-webkit-scrollbar-thumb,
     .modal-body::-webkit-scrollbar-thumb {
-      background: linear-gradient(180deg, #a78bfa 0%, var(--scrollbar-thumb) 50%, #6d28d9 100%);
+      background: linear-gradient(180deg, #fbab63 0%, var(--scrollbar-thumb) 50%, #b04f0c 100%);
       border-radius: 100px;
       border: 2px solid var(--scrollbar-track);
       box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
@@ -234,7 +234,7 @@
     .tab-content::-webkit-scrollbar-thumb:hover,
     .app-container::-webkit-scrollbar-thumb:hover,
     .modal-body::-webkit-scrollbar-thumb:hover {
-      background: linear-gradient(180deg, #c4b5fd 0%, var(--scrollbar-thumb-hover) 55%, #5b21b6 100%);
+      background: linear-gradient(180deg, #fdd3ab 0%, var(--scrollbar-thumb-hover) 55%, #8f4109 100%);
     }
 
     .tab-content::-webkit-scrollbar-thumb:active,
@@ -980,7 +980,7 @@
     }
 
     .nav-item.active:hover {
-      background: hsl(262 83% 92%);
+      background: hsl(28 95% 92%);
     }
 
     .nav-item:active {
@@ -1725,10 +1725,10 @@
       padding: 12px;
       transform: rotate(4deg);
       z-index: 3;
-      background: linear-gradient(145deg, hsl(262 70% 58%), hsl(280 65% 52%));
+      background: linear-gradient(145deg, hsl(22 88% 52%), hsl(36 92% 52%));
       border: none;
       color: #fff;
-      box-shadow: 0 12px 32px hsl(262 70% 40% / 0.32);
+      box-shadow: 0 12px 32px hsl(22 88% 38% / 0.32);
     }
 
     .login-preview-streak-head {
@@ -1768,7 +1768,7 @@
 
     .login-preview-streak-day.done {
       background: rgb(255 255 255 / 0.95);
-      color: hsl(262 70% 45%);
+      color: hsl(22 88% 42%);
     }
 
     .login-preview-streak-note {
@@ -1792,7 +1792,7 @@
       width: 38px;
       height: 38px;
       border-radius: 11px;
-      background: linear-gradient(135deg, hsl(262 83% 58% / 0.15), hsl(199 89% 48% / 0.12));
+      background: linear-gradient(135deg, hsl(22 92% 55% / 0.15), hsl(199 89% 48% / 0.12));
       display: flex;
       align-items: center;
       justify-content: center;
@@ -2549,7 +2549,7 @@
       align-items: flex-start;
       justify-content: space-between;
       gap: 12px;
-      background: linear-gradient(135deg, hsl(262 83% 58% / 0.12), hsl(var(--card)));
+      background: linear-gradient(135deg, hsl(22 92% 55% / 0.12), hsl(var(--card)));
       border-radius: 16px;
       padding: 16px 18px;
       border: 1px solid hsl(var(--border));
@@ -2752,8 +2752,8 @@
     }
 
     .sr-lesson-card {
-      background: hsl(262 83% 58% / 0.08);
-      border: 1px solid hsl(262 83% 58% / 0.18);
+      background: hsl(22 92% 55% / 0.08);
+      border: 1px solid hsl(22 92% 55% / 0.18);
       border-radius: 12px;
       padding: 12px 14px;
     }
@@ -3106,7 +3106,7 @@
     .sr-tbi-cat-bar-fill {
       height: 100%;
       border-radius: 999px;
-      background: hsl(var(--summary-purple));
+      background: hsl(var(--summary-brand));
     }
 
     .sr-tbi-footer {
@@ -3327,7 +3327,7 @@
             <div class="login-preview-bar-row">
               <span class="login-preview-bar-pct">Coding</span>
               <div class="login-preview-bar-track">
-                <div class="login-preview-bar-fill" style="width:82%;background:hsl(var(--summary-purple))"></div>
+                <div class="login-preview-bar-fill" style="width:82%;background:hsl(var(--primary))"></div>
               </div>
               <span class="login-preview-bar-time">2h 10m</span>
             </div>
@@ -6467,7 +6467,7 @@
       if (e.target.id === 'statusReportModal') closeStatusReportModal();
     });
     const TASK_BAR_COLORS = [
-      'hsl(var(--summary-purple))',
+      'hsl(var(--summary-brand))',
       'hsl(var(--summary-magenta))',
       'hsl(var(--summary-blue))',
       'hsl(var(--summary-teal))',
